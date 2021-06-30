@@ -24,6 +24,7 @@ import (
 	"github.com/containernetworking/cni/pkg/types/100"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
+	"golang.org/x/sys/unix"
 
 	"github.com/vishvananda/netlink"
 
@@ -104,6 +105,8 @@ var _ = Describe("tuning plugin", func() {
 			beforeConf.Mtu = link.Attrs().MTU
 			beforeConf.Promisc = new(bool)
 			*beforeConf.Promisc = (link.Attrs().Promisc != 0)
+			beforeConf.Allmulti = new(bool)
+			*beforeConf.Allmulti = (link.Attrs().RawFlags&unix.IFF_ALLMULTI != 0)
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -465,11 +468,12 @@ var _ = Describe("tuning plugin", func() {
 		})
 
 		It(fmt.Sprintf("[%s] configures and deconfigures mac address (from conf file) with ADD/DEL", ver), func() {
+			mac := "c2:11:22:33:44:55"
 			conf := []byte(fmt.Sprintf(`{
 				"name": "test",
 				"type": "iplink",
 				"cniVersion": "%s",
-				"mac": "c2:11:22:33:44:55",
+				"mac": "%s",
 				"prevResult": {
 					"interfaces": [
 						{"name": "dummy0", "sandbox":"netns"}
@@ -483,7 +487,7 @@ var _ = Describe("tuning plugin", func() {
 						}
 					]
 				}
-			}`, ver))
+			}`, ver, mac))
 
 			args := &skel.CmdArgs{
 				ContainerID: "dummy",
@@ -508,9 +512,10 @@ var _ = Describe("tuning plugin", func() {
 				Expect(len(result.IPs)).To(Equal(1))
 				Expect(result.IPs[0].Address.String()).To(Equal("10.0.0.2/24"))
 
+				Expect(result.Interfaces[0].Mac).To(Equal(mac))
 				link, err := netlink.LinkByName(IFNAME)
 				Expect(err).NotTo(HaveOccurred())
-				hw, err := net.ParseMAC("c2:11:22:33:44:55")
+				hw, err := net.ParseMAC(mac)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(link.Attrs().HardwareAddr).To(Equal(hw))
 
@@ -837,6 +842,148 @@ var _ = Describe("tuning plugin", func() {
 				Expect(link.Attrs().HardwareAddr.String()).To(Equal(beforeConf.Mac))
 				Expect(link.Attrs().MTU).To(Equal(beforeConf.Mtu))
 				Expect(link.Attrs().Promisc != 0).To(Equal(*beforeConf.Promisc))
+
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It(fmt.Sprintf("[%s] configures and deconfigures all-multicast mode with ADD/DEL", ver), func() {
+			conf := []byte(fmt.Sprintf(`{
+				"name": "test",
+				"type": "iplink",
+				"cniVersion": "%s",
+				"allmulti": true,
+				"prevResult": {
+					"interfaces": [
+						{"name": "dummy0", "sandbox":"netns"}
+					],
+					"ips": [
+						{
+							"version": "4",
+							"address": "10.0.0.2/24",
+							"gateway": "10.0.0.1",
+							"interface": 0
+						}
+					]
+				}
+			}`, ver))
+
+			args := &skel.CmdArgs{
+				ContainerID: "dummy",
+				Netns:       originalNS.Path(),
+				IfName:      IFNAME,
+				StdinData:   conf,
+			}
+
+			err := originalNS.Do(func(ns.NetNS) error {
+				defer GinkgoRecover()
+
+				r, _, err := testutils.CmdAddWithArgs(args, func() error {
+					return cmdAdd(args)
+				})
+				Expect(err).NotTo(HaveOccurred())
+
+				result, err := types100.GetResult(r)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(len(result.Interfaces)).To(Equal(1))
+				Expect(result.Interfaces[0].Name).To(Equal(IFNAME))
+				Expect(len(result.IPs)).To(Equal(1))
+				Expect(result.IPs[0].Address.String()).To(Equal("10.0.0.2/24"))
+
+				link, err := netlink.LinkByName(IFNAME)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(link.Attrs().RawFlags&unix.IFF_ALLMULTI != 0).To(BeTrue())
+
+				if testutils.SpecVersionHasCHECK(ver) {
+					n := &TuningConf{}
+					err = json.Unmarshal([]byte(conf), &n)
+					Expect(err).NotTo(HaveOccurred())
+
+					_, confString, err := buildOneConfig("testConfig", ver, n, r)
+					Expect(err).NotTo(HaveOccurred())
+
+					args.StdinData = confString
+
+					err = testutils.CmdCheckWithArgs(args, func() error {
+						return cmdCheck(args)
+					})
+					Expect(err).NotTo(HaveOccurred())
+				}
+
+				err = testutils.CmdDel(originalNS.Path(),
+					args.ContainerID, "", func() error { return cmdDel(args) })
+				Expect(err).NotTo(HaveOccurred())
+
+				link, err = netlink.LinkByName(IFNAME)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(link.Attrs().RawFlags&unix.IFF_ALLMULTI != 0).To(Equal(*beforeConf.Allmulti))
+
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It(fmt.Sprintf("[%s] configures and deconfigures all-multicast mode from args with ADD/DEL", ver), func() {
+			conf := []byte(fmt.Sprintf(`{
+				"name": "test",
+				"type": "iplink",
+				"cniVersion": "%s",
+				"args": {
+				    "cni": {
+					"allmulti": true
+				    }
+				},
+				"prevResult": {
+					"interfaces": [
+						{"name": "dummy0", "sandbox":"netns"}
+					],
+					"ips": [
+						{
+							"version": "4",
+							"address": "10.0.0.2/24",
+							"gateway": "10.0.0.1",
+							"interface": 0
+						}
+					]
+				}
+			}`, ver))
+
+			args := &skel.CmdArgs{
+				ContainerID: "dummy",
+				Netns:       originalNS.Path(),
+				IfName:      IFNAME,
+				StdinData:   conf,
+			}
+
+			err := originalNS.Do(func(ns.NetNS) error {
+				defer GinkgoRecover()
+
+				r, _, err := testutils.CmdAddWithArgs(args, func() error {
+					return cmdAdd(args)
+				})
+				Expect(err).NotTo(HaveOccurred())
+
+				result, err := types100.GetResult(r)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(len(result.Interfaces)).To(Equal(1))
+				Expect(result.Interfaces[0].Name).To(Equal(IFNAME))
+				Expect(len(result.IPs)).To(Equal(1))
+				Expect(result.IPs[0].Address.String()).To(Equal("10.0.0.2/24"))
+
+				link, err := netlink.LinkByName(IFNAME)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(link.Attrs().RawFlags&unix.IFF_ALLMULTI != 0).To(BeTrue())
+
+				err = testutils.CmdDel(originalNS.Path(),
+					args.ContainerID, "", func() error { return cmdDel(args) })
+				Expect(err).NotTo(HaveOccurred())
+
+				link, err = netlink.LinkByName(IFNAME)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(link.Attrs().RawFlags&unix.IFF_ALLMULTI != 0).To(Equal(*beforeConf.Allmulti))
 
 				return nil
 			})

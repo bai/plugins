@@ -6,7 +6,7 @@ require (
 	github.com/Microsoft/hcsshim v0.8.16
 	github.com/alexflint/go-filemutex v1.1.0
 	github.com/buger/jsonparser v1.1.1
-	github.com/containernetworking/cni v0.8.1-0.20201216164644-62e54113f44a
+	github.com/containernetworking/cni v1.0.0-rc1
 	github.com/coreos/go-iptables v0.5.0
 	github.com/coreos/go-systemd/v22 v22.2.0
 	github.com/d2g/dhcp4 v0.0.0-20170904100407-a1d1b6c41b1c
@@ -19,6 +19,7 @@ require (
 	github.com/onsi/gomega v1.10.3
 	github.com/safchain/ethtool v0.0.0-20190326074333-42ed695e3de8
 	github.com/sirupsen/logrus v1.8.1 // indirect
-	github.com/vishvananda/netlink v1.1.1-0.20201029203352-d40f9887b852
-	golang.org/x/sys v0.0.0-20210324051608-47abb6519492
+	github.com/vishvananda/netlink v1.1.1-0.20210330154013-f5de75959ad5
+	github.com/vishvananda/netns v0.0.0-20210104183010-2eb08e3e575f // indirect
+	golang.org/x/sys v0.0.0-20210414055047-fe65e336abe0
 )
